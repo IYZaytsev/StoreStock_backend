@@ -53,7 +53,6 @@ def create_app(config_name):
             object_from_result = wikipedia_search_with_brand(product_object['items']['brand'])
 
             # hitting wikipedia convert page id to url endpoint
-            # parent company is P355 on wikipedia property
             # if length of search array, no data on wikipedia can be found return 
             if len(object_from_result["query"]["search"]) == 0:
                 obj = {
@@ -66,18 +65,27 @@ def create_app(config_name):
             # hitting the wikipedia url from page id end point
             page_id = object_from_result["query"]["search"][0]["pageid"]
             object_from_result = get_url_from_page_id(page_id)
-            
             # doing everything above but for parent company, 
             # if no parent company is found, just return existing object
-            parent_corp = get_parent_corp(object_from_result['query']['pages'][f"{page_id}"]['title'])
-
-            if parent_corp != object_from_result['query']['pages'][f"{page_id}"]['title']:
-                object_from_result = wikipedia_search_with_brand(parent_corp)
+            parent_corp = get_parent_corp(object_from_result['query']['pages'][f"{page_id}"]['title'], 1)
+            ticker_symbol = "none"
+            if parent_corp['company_name'] != object_from_result['query']['pages'][f"{page_id}"]['title']:
+                object_from_result = wikipedia_search_with_brand(parent_corp['company_name'])
                 page_id = object_from_result["query"]["search"][0]["pageid"]
                 object_from_result = get_url_from_page_id(page_id)
+                ticker_symbol = get_parent_corp_stock_ticker(parent_corp['id'])
+            
+            # if no parent company is found, just return existing object
+            parent_corp = get_parent_corp(object_from_result['query']['pages'][f"{page_id}"]['title'], 2)
+            if parent_corp['company_name'] != object_from_result['query']['pages'][f"{page_id}"]['title']:
+                object_from_result = wikipedia_search_with_brand(parent_corp['company_name'])
+                page_id = object_from_result["query"]["search"][0]["pageid"]
+                object_from_result = get_url_from_page_id(page_id)
+                ticker_symbol = get_parent_corp_stock_ticker(parent_corp['id'])
 
             obj = {
                 'parent_company': object_from_result['query']['pages'][f"{page_id}"],
+                'ticker':ticker_symbol,
                 'product':product_object['items'],
             }
             barcodes[product_id] = obj
@@ -96,31 +104,43 @@ def wikipedia_search_with_brand(title):
 
     # hitting the wikipedia search endpoint
     percent_encoded_name = quote(title, safe='')
-    wikipedia_search_api = f"https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srsearch={percent_encoded_name}20Brand&srnamespace=0&srlimit=15"
+    wikipedia_search_api = f"https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srsearch={percent_encoded_name}&srnamespace=0&srlimit=15"
 
     result = python_curl(wikipedia_search_api)
     return ujson.loads(result)
 
 # hits wikidata api to get parent corporation until no parent company is found
-def get_parent_corp(title):
-    # looking for property P749 in json
+def get_parent_corp(title, round):
+    # looking for property P749 in json or P127
     parent_company_so_far = title
     percent_encoded_title = quote(title, safe='')
     get_info_box = f'https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&sites=enwiki&props=claims&titles={percent_encoded_title}'
 
     result = python_curl(get_info_box)
     object_from_result = ujson.loads(result)
+    parent_company_entity_id = 0
     entity_id = list(object_from_result['entities'].keys())[0]
     if "P749" in object_from_result['entities'][entity_id]['claims']:
         parent_company_entity_id = object_from_result['entities'][entity_id]['claims']["P749"][0]['mainsnak']['datavalue']['value']['id']
+    elif "P127" in object_from_result['entities'][entity_id]['claims'] and round == 1:
+        parent_company_entity_id = object_from_result['entities'][entity_id]['claims']["P127"][0]['mainsnak']['datavalue']['value']['id'] 
     else:
-        return parent_company_so_far
+        return  {'company_name':parent_company_so_far,'id':0}
+    
     get_parent_title = f'https://www.wikidata.org/wiki/Special:EntityData/{parent_company_entity_id}.json'
 
     result = python_curl(get_parent_title)
     object_from_result = ujson.loads(result)
     parent_company_so_far = object_from_result['entities'][parent_company_entity_id]["labels"]['en']['value']
-    return parent_company_so_far
+    return {'company_name':parent_company_so_far,'id':parent_company_entity_id}
+def get_parent_corp_stock_ticker(id):
+    # looking for property P249 in json
+    get_info_box = f'https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&sites=enwiki&props=claims&ids={id}'
+    result = python_curl(get_info_box)
+    object_from_result = ujson.loads(result)
+    if "P414" in object_from_result['entities'][id]['claims']:
+        return object_from_result['entities'][id]['claims']["P414"][0]['qualifiers']['P249'][0]['datavalue']['value']
+    return "none"
 
 # A general purpose curl that returns json as a string
 def python_curl(url, header=None):
