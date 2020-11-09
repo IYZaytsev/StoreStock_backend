@@ -12,6 +12,8 @@ import re
 import pycurl
 from io import BytesIO
 from urllib.parse import quote
+import yfinance as yf
+from datetime import date
 def create_app(config_name):
 
     # Creating a app
@@ -21,6 +23,7 @@ def create_app(config_name):
 
     # using a dictionary to cache api results to save on requests
     barcodes = {}
+    stock_prices = {}
     @app.route('/product/<string:product_id>', methods=['GET'])
     def return_product_info(product_id, **kwargs):
         # first check the cache to see if this item has been queried before the UPC database
@@ -92,7 +95,43 @@ def create_app(config_name):
             response = jsonify(obj)
             response.status_code = 200
             return response
+    @app.route('/company/<string:ticker>', methods=['GET'])
+    def return_company_stock_info(ticker, **kwargs):
+        # valid periods: 1d,5d,1mo,3mo,6mo,1y,2y,5y,10y,ytd,max
+        # Regular trading on the New York Stock Exchange and the Nasdaq electronic market ends at 4 p.m. EST.
+        today = date.today()
+        if (ticker == "NSN"):
+            ticker = "NSRGY"
+        ticker_and_date = today + ticker
+        if  ticker_and_date in stock_prices
+            response = jsonify(stock_prices[ticker_and_date])
+            response.status_code = 200
+            return response
 
+        stock = yf.Ticker(ticker)
+        stock_info = stock.info
+        open_close = stock.history(period="5d")
+        list_of_prices = []
+        for x in range(5):
+            obj = {
+                "open":open_close["Open"][x],
+                "close":open_close["Close"][x]
+            }
+            list_of_prices.append(obj)
+        return_obj = {
+            "name":stock_info['longName'],
+            "summary":stock_info['longBusinessSummary'],
+            "logo_url":stock_info['logo_url'],
+            "5day_prices":list_of_prices,
+            "fiftyTwoWeekHigh":stock_info['fiftyTwoWeekHigh'],
+            "fiftyTwoWeekLow":stock_info['fiftyTwoWeekLow'],
+            "marketCap":stock_info['marketCap'],   
+
+        }    
+        response = jsonify(return_obj)
+        stock_prices[ticker_and_date] = return_obj
+        response.status_code = 200
+        return response
     return app
 def get_url_from_page_id(page_id):
         wikipedia_resolve_id_to_url = f"https://en.wikipedia.org/w/api.php?action=query&prop=info&pageids={page_id}&format=json&inprop=url"
@@ -107,6 +146,7 @@ def wikipedia_search_with_brand(title):
     wikipedia_search_api = f"https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srsearch={percent_encoded_name}&srnamespace=0&srlimit=15"
 
     result = python_curl(wikipedia_search_api)
+    print(result)
     return ujson.loads(result)
 
 # hits wikidata api to get parent corporation until no parent company is found
@@ -124,6 +164,8 @@ def get_parent_corp(title, round):
         parent_company_entity_id = object_from_result['entities'][entity_id]['claims']["P749"][0]['mainsnak']['datavalue']['value']['id']
     elif "P127" in object_from_result['entities'][entity_id]['claims'] and round == 1:
         parent_company_entity_id = object_from_result['entities'][entity_id]['claims']["P127"][0]['mainsnak']['datavalue']['value']['id'] 
+    elif "P176" in object_from_result['entities'][entity_id]['claims'] and round == 1:
+        parent_company_entity_id = object_from_result['entities'][entity_id]['claims']["P176"][0]['mainsnak']['datavalue']['value']['id'] 
     else:
         return  {'company_name':parent_company_so_far,'id':0}
     
