@@ -13,7 +13,7 @@ import pycurl
 from io import BytesIO
 from urllib.parse import quote
 import yfinance as yf
-from datetime import date
+from datetime import datetime
 def create_app(config_name):
 
     # Creating a app
@@ -99,11 +99,12 @@ def create_app(config_name):
     def return_company_stock_info(ticker, **kwargs):
         # valid periods: 1d,5d,1mo,3mo,6mo,1y,2y,5y,10y,ytd,max
         # Regular trading on the New York Stock Exchange and the Nasdaq electronic market ends at 4 p.m. EST.
-        today = date.today()
+        now = datetime.now()
+        today = now.strftime("%m/%d/%Y, %H:%M:%S")
         if (ticker == "NSN"):
             ticker = "NSRGY"
         ticker_and_date = today + ticker
-        if  ticker_and_date in stock_prices
+        if  ticker_and_date in stock_prices:
             response = jsonify(stock_prices[ticker_and_date])
             response.status_code = 200
             return response
@@ -146,7 +147,6 @@ def wikipedia_search_with_brand(title):
     wikipedia_search_api = f"https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srsearch={percent_encoded_name}&srnamespace=0&srlimit=15"
 
     result = python_curl(wikipedia_search_api)
-    print(result)
     return ujson.loads(result)
 
 # hits wikidata api to get parent corporation until no parent company is found
@@ -180,7 +180,7 @@ def get_parent_corp_stock_ticker(id):
     get_info_box = f'https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&sites=enwiki&props=claims&ids={id}'
     result = python_curl(get_info_box)
     object_from_result = ujson.loads(result)
-    if "P414" in object_from_result['entities'][id]['claims']:
+    if "P414" in object_from_result['entities'][id]['claims'] and "qualifiers" in  object_from_result['entities'][id]['claims']["P414"][0]:
         return object_from_result['entities'][id]['claims']["P414"][0]['qualifiers']['P249'][0]['datavalue']['value']
     return "none"
 
