@@ -21,5 +21,5 @@ fi
 
 if [ "$ENV" == "server" ];
 then
-	uwsgi --ini bridge_backend.ini
+	uwsgi --ini storestock_backend.ini
 fi
