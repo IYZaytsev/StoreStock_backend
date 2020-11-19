@@ -6,6 +6,7 @@ class Config(object):
     DEBUG = False
     CSRF_ENABLED = True
     SECRET = os.getenv('SECRET')
+    JSON_AS_ASCII = False
 
 
 class DevelopmentConfig(Config):

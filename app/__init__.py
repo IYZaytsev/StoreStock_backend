@@ -14,7 +14,7 @@ from io import BytesIO
 from urllib.parse import quote
 import yfinance as yf
 from datetime import datetime
-
+import ftfy  
 
 def create_app(config_name):
 
@@ -120,6 +120,7 @@ def create_app(config_name):
 
         stock = yf.Ticker(ticker)
         stock_info = stock.info
+        summary = ftfy.fix_text(stock_info["longBusinessSummary"])
         open_close = stock.history(period="5d")
         list_of_prices = []
         for x in range(5):
@@ -128,14 +129,21 @@ def create_app(config_name):
                 "close": open_close["Close"][x]
             }
             list_of_prices.append(obj)
+        if "state" not in stock_info:
+            state = "none"
+        else:
+            state = stock_info["state"]
         return_obj = {
             "name": stock_info['longName'],
-            "summary": stock_info['longBusinessSummary'],
+            "summary": summary,
             "logo_url": stock_info['logo_url'],
             "5day_prices": list_of_prices,
             "fiftyTwoWeekHigh": stock_info['fiftyTwoWeekHigh'],
             "fiftyTwoWeekLow": stock_info['fiftyTwoWeekLow'],
             "marketCap": stock_info['marketCap'],
+            "city":stock_info['city'],
+            "state":state,
+            "country":stock_info["country"]
 
         }
         response = jsonify(return_obj)
