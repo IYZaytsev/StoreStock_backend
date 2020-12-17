@@ -16,7 +16,7 @@ echo "sourced env variables"
 if [ "$ENV" == "local" ];
 then
 	echo "Local DEVELOPMENT: starting server..."
-	python3 -m flask run -h 0.0.0.0 -p 5000
+	python3 -m flask run -h 127.0.0.1 -p 5000
 fi
 
 if [ "$ENV" == "server" ];

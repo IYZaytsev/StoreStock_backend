@@ -14,7 +14,9 @@ from io import BytesIO
 from urllib.parse import quote
 import yfinance as yf
 from datetime import datetime
-import ftfy  
+import ftfy
+from googlesearch import search 
+import sqlite3
 
 def create_app(config_name):
 
@@ -27,14 +29,12 @@ def create_app(config_name):
     barcodes = {}
     stock_prices = {}
 
+
     @app.route('/product/<string:product_id>', methods=['GET'])
     def return_product_info(product_id, **kwargs):
         # first check the cache to see if this item has been queried before the UPC database
         if len(barcodes.keys()) >= 1 and product_id in barcodes.keys():
-            obj = {
-                'result': barcodes[product_id],
-            }
-            response = jsonify(obj)
+            response = jsonify(barcodes[product_id])
             response.status_code = 200
             return response
         else:
@@ -46,11 +46,26 @@ def create_app(config_name):
             result = python_curl(barcode_api, header)
             product_object = ujson.loads(result)
 
-            # if the barcode is not in the UPC database, json response will have False in success
+
+            # if the barcode is not in the UPC database, return no data
             if not product_object['success']:
                 obj = {
                     'result': "no data can be found about this product",
                 }
+                response = jsonify(obj)
+                response.status_code = 200
+                return response
+
+            # search by brand and then search by company if no results try searching wikipedia
+            company = search_db_for_comapny(product_object['items']['brand'])
+            ticker = serach_db_for_ticker(company)
+            if company != "":
+                obj = {
+                    'parent_company': company,
+                    'ticker': ticker,
+                    'product': product_object['items'],
+                }
+                barcodes[product_id] = obj
                 response = jsonify(obj)
                 response.status_code = 200
                 return response
@@ -62,9 +77,20 @@ def create_app(config_name):
             # hitting wikipedia convert page id to url endpoint
             # if length of search array, no data on wikipedia can be found return
             if len(object_from_result["query"]["search"]) == 0:
-                obj = {
-                    'result': "no data can be found about this product",
-                }
+                # search by brand and then search by company if no results found then return this message
+                company = search_db_for_comapny(product_object['items']['brand'])
+                ticker = serach_db_for_ticker(company)
+                if company != "":
+                    obj = {
+                        'parent_company': company,
+                        'ticker': ticker,
+                        'product': product_object['items'],
+                    }
+                else:
+                    obj = {
+                        'result': "no data can be found about this product",
+                    }
+                
                 response = jsonify(obj)
                 response.status_code = 200
                 return response
@@ -72,6 +98,7 @@ def create_app(config_name):
             # hitting the wikipedia url from page id end point
             page_id = object_from_result["query"]["search"][0]["pageid"]
             object_from_result = get_url_from_page_id(page_id)
+
             # doing everything above but for parent company,
             # if no parent company is found, just return existing object
             parent_corp = get_parent_corp(
@@ -99,6 +126,34 @@ def create_app(config_name):
                 'ticker': ticker_symbol,
                 'product': product_object['items'],
             }
+            # if ticker is empty search csv by parent_company, if no results then search by brand name and then search by company
+            if obj['ticker'] == "none":
+                # Use the company name found from wikipedia, if returns valid company search ticker db 
+                company = search_db_for_comapny(obj['parent_company']['title'])
+                ticker = serach_db_for_ticker(company)
+                if company != "":
+                    obj = {
+                        'parent_company': company,
+                        'ticker': ticker,
+                        'product': product_object['items'],
+                    }
+                else:
+                    # if company name from wikipedia is bad, use the original brand name from the UPC database
+                    company = search_db_for_comapny(product_object['items']['brand'])
+                    ticker = serach_db_for_ticker(company)
+                    if company != "":
+                        obj = {
+                            'parent_company': company,
+                            'ticker': ticker,
+                            'product': product_object['items'],
+                        }
+                    else:
+                        # if both are bad just return no data 
+                         obj = {
+                        'result': "no data can be found about this product",
+                         }
+
+                    
             barcodes[product_id] = obj
             response = jsonify(obj)
             response.status_code = 200
@@ -143,6 +198,7 @@ def create_app(config_name):
             "marketCap": stock_info['marketCap'],
             "city":stock_info['city'],
             "state":state,
+            "website":stock_info.get("website", "none"),
             "country":stock_info["country"]
 
         }
@@ -150,17 +206,60 @@ def create_app(config_name):
         stock_prices[ticker_and_date] = return_obj
         response.status_code = 200
         return response
+
     return app
 
+def search_db_for_comapny(brand_name):
+    # DB connection
+    brand_name = re.sub(',?\s*(llc|inc|co)\.?$', '', brand_name, flags=re.IGNORECASE)
+    brand_name = brand_name.strip()
+    db = sqlite3.connect("store_stock.db")
+    cur = db.cursor()
+    cur.execute(f"SELECT parent, count(*) as frequency FROM parent_companies WHERE affiliate_name LIKE \"%{brand_name}%\" Group by parent order by count(*) desc")
+    res = cur.fetchone()
+    
+    return "" if res == None else res[0] 
 
+def serach_db_for_ticker(company_name):
+    # DB connection
+    company_name = re.sub(',?\s*(llc|inc|co)\.?$', '', company_name, flags=re.IGNORECASE)
+    company_name = company_name.strip()
+    db = sqlite3.connect("store_stock.db")
+    cur = db.cursor()
+    cur.execute(f"Select ACT_symbol, company_name from ( SELECT ACT_symbol, company_name FROM nyse_listed WHERE company_name LIKE \"%{company_name}%\" union Select ACT_symbol, company_name from amex_listed WHERE company_name LIKE \"%{company_name}%\" union Select ACT_symbol, company_name from nasdaq_listed WHERE company_name LIKE \"%{company_name}%\")")
+    res = cur.fetchone()  
+    # search google for ticker if not found
+    if res == None:
+        google_ticker_search = name_convert(company_name)
+        return "" if google_ticker_search == None else google_ticker_search
+
+    return "" if res == None else res[0] 
 def get_url_from_page_id(page_id):
     wikipedia_resolve_id_to_url = f"https://en.wikipedia.org/w/api.php?action=query&prop=info&pageids={page_id}&format=json&inprop=url"
     result = python_curl(wikipedia_resolve_id_to_url)
     return ujson.loads(result)
 
+# searchs google for ticker, takes a long time so best to be avoided
+def name_convert(self):
+
+    searchval = 'yahoo finance '+self
+    link = []
+    #limits to the first link
+    for url in search(searchval, tld='es', lang='es', stop=1):
+        link.append(url)
+
+    link = str(link[0])
+    link=link.split("/")
+    if link[-1]=='':
+        ticker=link[-2]
+    else:
+        x=link[-1].split('=')
+        ticker=x[-1]
+
+    return(ticker)
+
+
 # returns the search results for title brand
-
-
 def wikipedia_search_with_brand(title):
 
     # hitting the wikipedia search endpoint
